@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lokale AI Audio Transcriptie</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom scrollbar voor een strakkere look */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8; 
+        }
+        
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .drop-zone {
+            transition: all 0.3s ease;
+        }
+        .drop-zone.dragover {
+            background-color: #eff6ff;
+            border-color: #3b82f6;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans min-h-screen flex flex-col items-center p-4 sm:p-8">
+
+    <div class="max-w-4xl w-full bg-white rounded-2xl shadow-xl overflow-hidden flex flex-col">
+        <!-- Header -->
+        <header class="bg-blue-600 text-white p-6 text-center">
+            <h1 class="text-2xl sm:text-3xl font-bold mb-2">Lokale Audio Transcriptie</h1>
+            <p class="text-blue-100 text-sm sm:text-base">Genereer transcripties met sprekeronderscheid (A/B) lokaal op je apparaat, zonder externe API's.</p>
+        </header>
+
+        <!-- Main Content Area -->
+        <main class="p-6 flex-grow flex flex-col gap-6">
+            
+            <!-- File Protocol Warning -->
+            <div id="fileProtocolWarning" class="hidden bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 rounded-xl shadow-sm text-sm">
+                <strong>Let op: Beperkte functionaliteit!</strong> Je opent dit bestand direct vanaf je hardeschijf (via <code>file:///</code>). 
+                Webbrowsers blokkeren in deze modus het lokaal opslaan van grote bestanden. Hierdoor <strong>moet het AI-model elke keer opnieuw gedownload worden</strong> en kan de app vastlopen op "Initialiseren...".<br><br>
+                <em>Oplossing:</em> Test deze app in de online preview, gebruik een lokale webserver (zoals de "Live Server" extensie in VS Code), of host dit bestand ergens online (bijv. GitHub Pages).
+            </div>
+
+            <!-- Upload Sectie -->
+            <section>
+                <div id="dropZone" class="drop-zone border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:bg-gray-50">
+                    <input type="file" id="audioInput" accept="audio/wav, audio/mp3, audio/ogg" class="hidden">
+                    <svg class="mx-auto h-12 w-12 text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    <p class="text-lg font-medium text-gray-700">Sleep een audiobestand (.wav, .mp3) hierheen</p>
+                    <p class="text-sm text-gray-500 mt-2">of klik om een bestand te kiezen</p>
+                    <p id="fileNameDisplay" class="mt-4 text-sm font-semibold text-blue-600 hidden"></p>
+                </div>
+            </section>
+
+            <!-- Controls & Status -->
+            <section class="flex flex-col sm:flex-row items-center justify-between gap-4 bg-gray-50 p-4 rounded-xl border border-gray-100">
+                <div class="flex items-center gap-3 w-full sm:w-auto">
+                    <button id="transcribeBtn" disabled class="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-semibold py-2 px-6 rounded-lg transition-colors w-full sm:w-auto flex items-center justify-center gap-2">
+                        <span>Start Transcriptie</span>
+                    </button>
+                    <div id="loadingIndicator" class="hidden flex items-center gap-2 text-blue-600 font-medium">
+                        <div class="loader"></div>
+                        <span id="statusText">Model laden...</span>
+                    </div>
+                </div>
+                
+                <div class="text-xs text-gray-500 text-right w-full sm:w-auto">
+                    <p>Status: <span id="modelStatus" class="font-semibold text-orange-500">Initialiseren...</span></p>
+                    <div id="progressContainer" class="hidden w-32 h-1.5 bg-gray-200 rounded-full mt-2 overflow-hidden mx-auto sm:ml-auto sm:mr-0">
+                        <div id="progressBar" class="h-full bg-blue-600 w-0 transition-all duration-300"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Transcriptie Output -->
+            <section class="flex-grow flex flex-col h-[400px]">
+                <div class="flex justify-between items-center mb-2">
+                    <h2 class="text-xl font-bold text-gray-800">Transcriptie</h2>
+                    <button id="copyBtn" class="hidden text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path></svg>
+                        Kopieer
+                    </button>
+                </div>
+                
+                <div id="transcriptOutput" class="bg-white p-6 sm:p-10 rounded-xl border border-gray-200 flex-grow overflow-y-auto text-base leading-relaxed relative shadow-inner">
+                    <!-- Placeholder text -->
+                    <div id="placeholderText" class="absolute inset-0 flex items-center justify-center text-gray-400 italic">
+                        Het resultaat verschijnt hier in document-stijl...
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Transformers.js inladen via CDN -->
+    <script type="module">
+        // We upgraden naar de stabiele Transformers.js V3 voor WebGPU (NPU/GPU) ondersteuning!
+        import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.0';
+
+        // Configuratie voor lokale executie
+        env.allowLocalModels = false;
+        
+        // DOM Elementen
+        const dropZone = document.getElementById('dropZone');
+        const audioInput = document.getElementById('audioInput');
+        const fileNameDisplay = document.getElementById('fileNameDisplay');
+        const transcribeBtn = document.getElementById('transcribeBtn');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const statusText = document.getElementById('statusText');
+        const modelStatus = document.getElementById('modelStatus');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressBar = document.getElementById('progressBar');
+        const transcriptOutput = document.getElementById('transcriptOutput');
+        const placeholderText = document.getElementById('placeholderText');
+        const copyBtn = document.getElementById('copyBtn');
+
+        // Status variabelen
+        let audioFile = null;
+        let transcriber = null;
+        let isTranscribing = false;
+
+        // Bepaal hardware acceleratie
+        const determineDevice = () => {
+            if (navigator.gpu) {
+                return 'webgpu'; // Gebruik Videokaart / NPU als de browser dit ondersteunt
+            }
+            return 'wasm'; // Fallback naar CPU
+        };
+
+        // Controleer of het via file:// draait en toon waarschuwing
+        if (window.location.protocol === 'file:') {
+            document.getElementById('fileProtocolWarning').classList.remove('hidden');
+        }
+
+        // Initialiseer het model (Whisper Small voor véél betere NL accuraatheid)
+        async function initModel() {
+            try {
+                const targetDevice = determineDevice();
+                modelStatus.textContent = `Model laden via ${targetDevice.toUpperCase()}...`;
+                modelStatus.className = 'font-semibold text-orange-500';
+                progressContainer.classList.remove('hidden');
+                
+                const updateProgress = (progressData) => {
+                    if (progressData.status === 'progress') {
+                        // De library stuurt soms floats, we ronden dit af naar hele percentages
+                        const progress = Math.round(progressData.progress);
+                        modelStatus.textContent = `Downloaden... ${progress}%`;
+                        progressBar.style.width = `${progress}%`;
+                    }
+                };
+                
+                try {
+                    // Laad Whisper 'small' - zwaarder (~500mb), maar aanzienlijk beter in Nederlands
+                    transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small', {
+                        device: targetDevice,
+                        progress_callback: updateProgress
+                    });
+                } catch (gpuError) {
+                    console.warn("WebGPU laden mislukt, terugvallen op CPU (WASM)", gpuError);
+                    modelStatus.textContent = `Fallback naar CPU laden...`;
+                    progressBar.style.width = '0%'; // Reset balk voor CPU download
+                    transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small', {
+                        device: 'wasm',
+                        progress_callback: updateProgress
+                    });
+                }
+                
+                progressContainer.classList.add('hidden');
+                modelStatus.textContent = 'Model Gereed (Lokaal)';
+                modelStatus.className = 'font-semibold text-green-600';
+                
+                if (audioFile) {
+                    transcribeBtn.disabled = false;
+                }
+            } catch (error) {
+                console.error("Fout bij laden model:", error);
+                modelStatus.textContent = 'Fout bij laden model';
+                modelStatus.className = 'font-semibold text-red-600';
+                alert("Kon het AI model niet laden. Zorg voor een actieve internetverbinding de eerste keer.");
+            }
+        }
+
+        initModel();
+
+        // Drag & Drop Logica
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            
+            if (e.dataTransfer.files.length > 0) {
+                handleFileSelect(e.dataTransfer.files[0]);
+            }
+        });
+
+        dropZone.addEventListener('click', () => {
+            audioInput.click();
+        });
+
+        audioInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFileSelect(e.target.files[0]);
+            }
+        });
+
+        function handleFileSelect(file) {
+            if (!file.type.startsWith('audio/')) {
+                alert("Selecteer a.u.b. een geldig audiobestand (.wav, .mp3, etc.)");
+                return;
+            }
+
+            audioFile = file;
+            fileNameDisplay.textContent = `Geselecteerd: ${file.name}`;
+            fileNameDisplay.classList.remove('hidden');
+            
+            if (transcriber) {
+                transcribeBtn.disabled = false;
+            }
+        }
+
+        async function readAudioFrom(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    try {
+                        const arrayBuffer = e.target.result;
+                        const audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                            sampleRate: 16000
+                        });
+                        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                        
+                        let audioData;
+                        if (audioBuffer.numberOfChannels === 2) {
+                            const left = audioBuffer.getChannelData(0);
+                            const right = audioBuffer.getChannelData(1);
+                            audioData = new Float32Array(left.length);
+                            for (let i = 0; i < left.length; ++i) {
+                                audioData[i] = (left[i] + right[i]) / 2;
+                            }
+                        } else {
+                            audioData = audioBuffer.getChannelData(0);
+                        }
+                        
+                        resolve(audioData);
+                    } catch (err) {
+                        reject(err);
+                    }
+                };
+                reader.onerror = (err) => reject(err);
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        transcribeBtn.addEventListener('click', async () => {
+            if (!audioFile || !transcriber || isTranscribing) return;
+
+            isTranscribing = true;
+            transcribeBtn.disabled = true;
+            transcribeBtn.classList.add('hidden');
+            loadingIndicator.classList.remove('hidden');
+            placeholderText.style.display = 'none';
+            transcriptOutput.innerHTML = '';
+            copyBtn.classList.add('hidden');
+
+            try {
+                statusText.textContent = "Audio voorbereiden...";
+                const audioData = await readAudioFrom(audioFile);
+
+                statusText.textContent = "Bezig met transcriberen (dit is veel sneller met WebGPU)...";
+                
+                const output = await transcriber(audioData, {
+                    chunk_length_s: 30, 
+                    stride_length_s: 5,
+                    return_timestamps: true,
+                    language: 'dutch',
+                    task: 'transcribe'
+                });
+                
+                statusText.textContent = "Opmaak genereren...";
+
+                let finalTranscriptHtml = "";
+                let currentSpeaker = "Spreker 1";
+                const pauseThreshold = 1.0; 
+                
+                if (output.chunks && output.chunks.length > 0) {
+                    let previousEnd = 0;
+                    
+                    output.chunks.forEach((chunk, index) => {
+                        const start = chunk.timestamp[0];
+                        const end = chunk.timestamp[1];
+                        // Haal gekke tekens en overbodige spaties weg
+                        const text = chunk.text.trim();
+                        
+                        // Heuristiek voor sprekerwissel
+                        if (index > 0 && (start - previousEnd) > pauseThreshold) {
+                            currentSpeaker = currentSpeaker === "Spreker 1" ? "Spreker 2" : "Spreker 1";
+                        }
+                        
+                        // Formatteer als een strak Word document
+                        finalTranscriptHtml += `
+                            <div class="mb-5">
+                                <div class="text-gray-500 font-mono text-sm">${formatTime(start)}</div>
+                                <div class="font-bold text-gray-900 mt-1">${currentSpeaker}</div>
+                                <div class="text-gray-800 mt-1">${text}</div>
+                            </div>
+                        `;
+                        
+                        previousEnd = end;
+                    });
+                } else {
+                    finalTranscriptHtml = `
+                        <div class="mb-5">
+                            <div class="text-gray-500 font-mono text-sm">00:00:00</div>
+                            <div class="font-bold text-gray-900 mt-1">Spreker 1</div>
+                            <div class="text-gray-800 mt-1">${output.text}</div>
+                        </div>
+                    `;
+                }
+
+                transcriptOutput.innerHTML = finalTranscriptHtml;
+                copyBtn.classList.remove('hidden');
+
+            } catch (error) {
+                console.error("Fout tijdens transcriptie:", error);
+                transcriptOutput.innerHTML = `<span class="text-red-500 font-bold">Er is een fout opgetreden:</span> ${error.message}`;
+            } finally {
+                isTranscribing = false;
+                loadingIndicator.classList.add('hidden');
+                transcribeBtn.classList.remove('hidden');
+                transcribeBtn.disabled = false;
+            }
+        });
+
+        // Hulpfunctie om seconden op te maken als HH:MM:SS
+        function formatTime(seconds) {
+            if (seconds === null || seconds === undefined) return "00:00:00";
+            const hrs = Math.floor(seconds / 3600);
+            const mins = Math.floor((seconds % 3600) / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        // Kopieer functionaliteit voor Word (kopieert platte tekst netjes gescheiden)
+        copyBtn.addEventListener('click', () => {
+            const blocks = transcriptOutput.querySelectorAll('.mb-5');
+            let textToCopy = "";
+            
+            blocks.forEach(block => {
+                const time = block.children[0].innerText;
+                const speaker = block.children[1].innerText;
+                const text = block.children[2].innerText;
+                textToCopy += `${time}\n${speaker}\n${text}\n\n`;
+            });
+
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                const originalText = copyBtn.innerHTML;
+                copyBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> Gekopieerd!';
+                setTimeout(() => {
+                    copyBtn.innerHTML = originalText;
+                }, 2000);
+            }).catch(err => {
+                console.error('Fout bij kopiëren: ', err);
+                alert('Kopiëren mislukt.');
+            });
+        });
+    </script>
+</body>
+</html>
